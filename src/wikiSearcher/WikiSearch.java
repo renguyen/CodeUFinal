@@ -1,6 +1,7 @@
 package wikiSearcher;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -150,27 +151,81 @@ public class WikiSearch {
 			return new WikiSearch(map);
 		}
 
-		public static void main(String[] args) throws IOException {
-
-			// make a JedisIndex
+		/**
+		 * Helper function that returns index of first actual search term (doesn't include/
+		 * isn't an operator) of the user inputted arguments starting from the given index
+		 * @param startIndex which index to start searching
+		 * @param excludeTerms list of terms that are to be excluded
+		 * @param args user inputted terms
+		 * @return
+		 */
+		private static int getNextTerm(int startIndex, ArrayList<String> excludeTerms, String[] args) {
+			for (int i = startIndex; i < args.length; i++) {
+				if (args[i].charAt(0) == '-') {
+					excludeTerms.add(args[i]);
+				} else if (isNotOperator(args[i])) {
+					return i;
+				}
+			}
+			
+			return -1;
+		}
+		
+		/**
+		 * Checks if given term is AND or OR
+		 * @param term
+		 * @return true if term = AND/OR
+		 */
+		private static boolean isNotOperator(String term) {
+			return (!term.equals("AND") && !term.equals("OR"));
+		}
+		
+		private static void getSearchResults(int currIndex, ArrayList<String> excludeTerms, String[] args) throws IOException {
 			Jedis jedis = JedisMaker.make();
 			JedisIndex index = new JedisIndex(jedis);
-
-			// search for the first term
-			String term1 = "java";
-			System.out.println("Query: " + term1);
-			WikiSearch search1 = search(term1, index);
-			search1.print();
-
-			// search for the second term
-			String term2 = "programming";
-			System.out.println("Query: " + term2);
-			WikiSearch search2 = search(term2, index);
-			search2.print();
-
-			// compute the intersection of the searches
-			System.out.println("Query: " + term1 + " AND " + term2);
-			WikiSearch intersection = search1.and(search2);
-			intersection.print();
+			
+			WikiSearch results;
+			results = search(args[currIndex], index);
+			currIndex++;
+			while (currIndex < args.length) {
+				String currTerm = args[currIndex];
+				if (currTerm.charAt(0) == '-') {
+					excludeTerms.add(currTerm);
+				} else {
+					if (isNotOperator(currTerm)) {
+						WikiSearch otherSearch = search(currTerm, index);
+						results = results.and(otherSearch);
+					} else {
+						currIndex++;
+						if (currIndex >= args.length) break;
+						String otherTerm = args[currIndex]; // TODO: check that still not operator?
+						WikiSearch otherSearch = search(otherTerm, index);
+						if (currTerm.equals("AND")) {
+							results = results.and(otherSearch);
+						} else {
+							results = results.or(otherSearch);
+						}
+					}		
+				}
+				currIndex++;
+			}
+			
+			for (String term : excludeTerms) {
+				WikiSearch otherSearch = search(term, index);
+				results = results.minus(otherSearch);
+			}
+			
+			if (results != null) results.print();
+		}
+		
+		public static void main(String[] args) throws IOException {			
+			ArrayList<String> excludeTerms = new ArrayList<String>();
+			int currIndex = getNextTerm(0, excludeTerms, args);
+			if (currIndex != -1) {
+				getSearchResults(currIndex, excludeTerms, args);
+			} else {
+				System.out.println("Please enter at least one valid search term.");
+			}
+			
 		}
 }
